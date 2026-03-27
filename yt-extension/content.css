@@ -1,0 +1,137 @@
+#yt-dl-menu-container {
+  position: fixed;
+  right: 20px;
+  bottom: 120px;
+  z-index: 999999;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+#yt-dl-main-btn {
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  border: none;
+  color: white;
+  font-size: 24px;
+  cursor: pointer;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+  transition: all 0.3s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#yt-dl-main-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 6px 20px rgba(102,126,234,0.4);
+}
+
+#yt-dl-menu {
+  position: absolute;
+  bottom: 70px;
+  right: 0;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+  padding: 8px;
+  min-width: 200px;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(10px);
+  transition: all 0.3s;
+}
+
+#yt-dl-menu.active {
+  opacity: 1;
+  pointer-events: all;
+  transform: translateY(0);
+}
+
+.menu-section {
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.menu-section:last-child {
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.menu-label {
+  font-size: 11px;
+  color: #999;
+  font-weight: 600;
+  padding: 8px 12px 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.menu-item {
+  padding: 10px 12px;
+  color: #333;
+  cursor: pointer;
+  transition: all 0.2s;
+  border-radius: 6px;
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menu-item:hover {
+  background: #f5f5f5;
+  color: #667eea;
+}
+
+.menu-item .icon {
+  font-size: 16px;
+}
+
+#yt-dl-notification {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  background: white;
+  padding: 16px 20px;
+  border-radius: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  z-index: 999999;
+  opacity: 0;
+  transform: translateX(400px);
+  transition: all 0.3s;
+  max-width: 350px;
+  pointer-events: none;
+}
+
+#yt-dl-notification.show {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: all;
+}
+
+.notification-title {
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.notification-message {
+  color: #666;
+  font-size: 13px;
+}
+
+.notification-success {
+  border-left: 4px solid #4ade80;
+}
+
+.notification-error {
+  border-left: 4px solid #ff4444;
+}
+
+.notification-info {
+  border-left: 4px solid #667eea;
+}
