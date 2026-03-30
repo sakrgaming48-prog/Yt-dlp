@@ -11,8 +11,23 @@ import datetime
 import time
 
 PORT = 8765
-YTDLP_EXE = r"D:\a\Files\Apps\yt-dlp.exe"
-OUTDIR = r"D:\p\Downloads\Random"
+
+# 🚀 الذكاء الاصطناعي للمسارات (Smart Paths) 🚀
+# 1. مسار أداة التحميل (yt-dlp)
+PERSONAL_EXE = r"D:\a\Files\Apps\yt-dlp.exe"
+if os.path.exists(PERSONAL_EXE):
+    YTDLP_EXE = PERSONAL_EXE # هيشتغل على جهازك إنت
+else:
+    # هيشتغل على جهاز صحابك (هيدور على الأداة في نفس الفولدر اللي فيه السيرفر)
+    YTDLP_EXE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "yt-dlp.exe")
+
+# 2. مسار حفظ الفيديوهات
+PERSONAL_OUTDIR = r"D:\p\Downloads\Random"
+if os.path.exists(PERSONAL_OUTDIR):
+    OUTDIR = PERSONAL_OUTDIR # هيحفظ في الفولدر بتاعك
+else:
+    # هيعمل فولدر لصحابك في مجلد التنزيلات الافتراضي بتاع الويندوز
+    OUTDIR = os.path.join(os.path.expanduser("~"), "Downloads", "YT-Downloads")
 
 if not os.path.exists(OUTDIR):
     os.makedirs(OUTDIR)
@@ -34,7 +49,6 @@ def extract_video_id(url):
 def check_duplicate(url):
     vid = extract_video_id(url)
     for d in downloads.values():
-        # ضفنا "scheduled" لقائمة الحماية لمنع تكرار فيديو مجدول
         if d['status'] in['queued', 'downloading', 'downloading audio', 'converting', 'cancelled', 'scheduled']:
             d_vid = extract_video_id(d['url'])
             if vid and d_vid and vid == d_vid:
@@ -56,10 +70,8 @@ def run_download(did, url, mode, start_time=None, end_time=None, subtitles=False
     
     cmd =[YTDLP_EXE, '--newline', '--no-mtime', '--no-warnings', '-N', '4', '--http-chunk-size', '10M']
     
-    # 🔥 ميزة دمج صورة الغلاف دائماً 🔥
     cmd.extend(['--embed-thumbnail'])
     
-    # 🔥 ميزة الترجمة التلقائية (لو المستخدم طلبها) 🔥
     if subtitles:
         cmd.extend(['--write-subs', '--write-auto-subs', '--sub-langs', 'en.*,ar.*', '--embed-subs'])
     
@@ -138,7 +150,6 @@ def run_download(did, url, mode, start_time=None, end_time=None, subtitles=False
         if did in active_processes:
             del active_processes[did]
 
-# 🔥 محرك الجدولة الليلية (يعمل في الخلفية) 🔥
 def scheduler_loop():
     last_checked = None
     while True:
@@ -268,5 +279,5 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 if __name__ == '__main__':
     server = socketserver.TCPServer(('', PORT), Handler)
-    print(f" ✅ Enterprise Server | Subs & Covers | Scheduler 🌙")
+    print(f" ✅ Universal Enterprise Server | Smart Paths 🌐")
     server.serve_forever()
