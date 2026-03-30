@@ -1,260 +1,272 @@
-# dler_server.py - Clean version without --no-update-check
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import json, subprocess, threading, re, os, time
-from urllib.parse import urlparse, parse_qs
+import http.server
+import socketserver
+import json
+import os
+import subprocess
+import threading
+import uuid
+import urllib.parse as urlparse
+import re
+import datetime
+import time
 
-HOST = '127.0.0.1'
 PORT = 8765
+YTDLP_EXE = r"D:\a\Files\Apps\yt-dlp.exe"
+OUTDIR = r"D:\p\Downloads\Random"
 
-YTDLP_DIR = r"D:\a\Files\Apps"
-YTDLP_EXE = os.path.join(YTDLP_DIR, "yt-dlp.exe")
-OUTDIR = r"D:\p\Downloads"
-LOG = os.path.join(OUTDIR, "server_log.txt")
+if not os.path.exists(OUTDIR):
+    os.makedirs(OUTDIR)
 
 downloads = {}
-download_counter = 0
+active_processes = {}
+queue_lock = threading.Lock() 
 
-def log(msg):
+def kill_tree(pid):
     try:
-        with open(LOG, "a", encoding="utf-8") as f:
-            f.write(f"[{time.strftime('%H:%M:%S')}] {msg}\n")
-        print(msg)
-    except:
-        print(msg)
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(pid)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass
 
-class Handler(BaseHTTPRequestHandler):
-    def _set_headers(self, code=200):
-        self.send_response(code)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.end_headers()
+def extract_video_id(url):
+    match = re.search(r'(?:v=|youtu\.be/|embed/|shorts/)([a-zA-Z0-9_-]{11})', url)
+    return match.group(1) if match else None
 
-    def do_OPTIONS(self):
-        self.send_response(200)
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS, DELETE')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        self.end_headers()
+def check_duplicate(url):
+    vid = extract_video_id(url)
+    for d in downloads.values():
+        # ضفنا "scheduled" لقائمة الحماية لمنع تكرار فيديو مجدول
+        if d['status'] in['queued', 'downloading', 'downloading audio', 'converting', 'cancelled', 'scheduled']:
+            d_vid = extract_video_id(d['url'])
+            if vid and d_vid and vid == d_vid:
+                return d['status']
+            if url == d['url']:
+                return d['status']
+    return False
 
-    def do_GET(self):
-        path = urlparse(self.path).path
-        
-        if path == '/queue':
-            self._set_headers(200)
-            self.wfile.write(json.dumps({'status': 'ok', 'downloads': downloads}).encode())
-            
-        elif path == '/check-update':
-            version = check_ytdlp_version()
-            self._set_headers(200)
-            self.wfile.write(json.dumps({'status': 'ok', 'version': version}).encode())
-        
-        else:
-            self._set_headers(200)
-            self.wfile.write(json.dumps({'status': 'ok', 'msg': 'server running'}).encode())
-
-    def do_POST(self):
-        path = urlparse(self.path).path
-        length = int(self.headers.get('Content-Length', 0))
-        body = self.rfile.read(length).decode('utf-8') if length > 0 else '{}'
-
-        try:
-            data = json.loads(body) if body else {}
-            
-            if path == '/download':
-                url = data.get("url")
-                mode = data.get("mode")
-                urls = data.get("urls", [])
-
-                if not mode:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'status': 'error', 'msg': 'missing mode'}).encode())
-                    return
-
-                if urls:
-                    download_ids = []
-                    for u in urls:
-                        if u.strip():
-                            did = start_download(u.strip(), mode)
-                            download_ids.append(did)
-                    
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({'status': 'ok', 'msg': f'started {len(download_ids)} downloads', 'download_ids': download_ids}).encode())
-                elif url:
-                    download_id = start_download(url, mode)
-                    self._set_headers(200)
-                    self.wfile.write(json.dumps({'status': 'ok', 'msg': 'started', 'download_id': download_id}).encode())
-                else:
-                    self._set_headers(400)
-                    self.wfile.write(json.dumps({'status': 'error', 'msg': 'missing url'}).encode())
-            
-            elif path == '/update-ytdlp':
-                threading.Thread(target=update_ytdlp, daemon=True).start()
-                self._set_headers(200)
-                self.wfile.write(json.dumps({'status': 'ok', 'msg': 'updating...'}).encode())
-            
-            else:
-                self._set_headers(404)
-                self.wfile.write(json.dumps({'status': 'error', 'msg': 'unknown endpoint'}).encode())
-
-        except Exception as e:
-            log(f"ERROR: {e}")
-            self._set_headers(500)
-            self.wfile.write(json.dumps({'status': 'error', 'msg': str(e)}).encode())
-
-    def do_DELETE(self):
-        path = urlparse(self.path).path
-        
-        if path == '/queue/completed':
-            global downloads
-            downloads = {k: v for k, v in downloads.items() if v['status'] not in ['completed', 'failed']}
-            self._set_headers(200)
-            self.wfile.write(json.dumps({'status': 'ok', 'msg': 'cleared'}).encode())
-        
-        elif path.startswith('/download/'):
-            download_id = path.split('/')[-1]
-            if download_id in downloads:
-                downloads[download_id]['status'] = 'cancelled'
-                self._set_headers(200)
-                self.wfile.write(json.dumps({'status': 'ok', 'msg': 'cancelled'}).encode())
-            else:
-                self._set_headers(404)
-                self.wfile.write(json.dumps({'status': 'error', 'msg': 'not found'}).encode())
-
-def start_download(url, mode):
-    global download_counter
-    download_counter += 1
-    download_id = f"dl_{download_counter}"
-    
-    downloads[download_id] = {
-        'id': download_id,
-        'url': url,
-        'mode': mode,
-        'status': 'queued',
-        'progress': 0,
-        'title': 'Loading...',
-        'speed': '',
-        'eta': '',
-        'error': None
-    }
-    
-    threading.Thread(target=run_download, args=(download_id, url, mode), daemon=True).start()
-    return download_id
-
-def run_download(download_id, url, mode):
+def watchdog(did, process):
     try:
-        downloads[download_id]['status'] = 'downloading'
+        process.wait(timeout=3600)
+    except subprocess.TimeoutExpired:
+        kill_tree(process.pid)
+        if did in downloads and downloads[did]['status'] not in['completed', 'cancelled']:
+            downloads[did]['status'] = 'failed'
+
+def run_download(did, url, mode, start_time=None, end_time=None, subtitles=False):
+    if did in downloads: downloads[did]['status'] = 'fetching info'
+    
+    cmd =[YTDLP_EXE, '--newline', '--no-mtime', '--no-warnings', '-N', '4', '--http-chunk-size', '10M']
+    
+    # 🔥 ميزة دمج صورة الغلاف دائماً 🔥
+    cmd.extend(['--embed-thumbnail'])
+    
+    # 🔥 ميزة الترجمة التلقائية (لو المستخدم طلبها) 🔥
+    if subtitles:
+        cmd.extend(['--write-subs', '--write-auto-subs', '--sub-langs', 'en.*,ar.*', '--embed-subs'])
+    
+    if 'list=' in url:
+        cmd.append('--yes-playlist')
+        cmd.extend(['-o', os.path.join(OUTDIR, '%(playlist_title)s', '%(playlist_index)s - %(title)s.%(ext)s')])
+    else:
+        cmd.extend(['-o', os.path.join(OUTDIR, '%(title)s.%(ext)s')])
+
+    if mode == 'audio':
+        cmd.extend(['-f', 'bestaudio[ext=m4a]/bestaudio', '--extract-audio', '--audio-format', 'm4a'])
+    else:
+        height = mode.replace('video', '')
+        if not height.isdigit(): height = '720'
+        cmd.extend(['-f', f'bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best', '--merge-output-format', 'mp4'])
+
+    if start_time and end_time:
+        cmd.extend(['--download-sections', f"*{start_time}-{end_time}", '--force-keyframes-at-cuts'])
+
+    cmd.append(url)
+    vid_id = extract_video_id(url) or 'Playlist'
+    print(f"\n[+] STARTING: {vid_id}")
+
+    try:
+        process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True, encoding='utf-8', errors='replace')
+        active_processes[did] = process
+        downloads[did]['status'] = 'downloading'
         
-        quality_map = {
-            'video1080': ['--no-playlist', '-S', 'res:1080', '--extractor-args', 'youtube:player_client=default'],
-            'video720': ['--no-playlist', '-S', 'res:720', '--extractor-args', 'youtube:player_client=default'],
-            'video480': ['--no-playlist', '-S', 'res:480', '--extractor-args', 'youtube:player_client=default'],
-            'video240': ['--no-playlist', '-S', 'res:240', '--extractor-args', 'youtube:player_client=default'],
-            'audio': ['--no-playlist', '-x', '--audio-format', 'mp3', '--extractor-args', 'youtube:player_client=default'],
-            'playlist1080': ['-S', 'res:1080', '--extractor-args', 'youtube:player_client=default'],
-            'playlist720': ['-S', 'res:720', '--extractor-args', 'youtube:player_client=default'],
-            'playlist480': ['-S', 'res:480', '--extractor-args', 'youtube:player_client=default'],
-            'playlist_audio': ['-x', '--audio-format', 'mp3', '--extractor-args', 'youtube:player_client=default']
-        }
-        
-        output_template = OUTDIR + r'\%(title)s.%(ext)s'
-        if 'playlist' in mode:
-            output_template = OUTDIR + r'\%(playlist_title)s\%(title)s.%(ext)s'
-        
-        cmd = [
-            YTDLP_EXE,
-            *quality_map.get(mode, ['--no-playlist', '-S', 'res:720', '--extractor-args', 'youtube:player_client=default']),
-            '-o', output_template,
-            '--newline',
-            url
-        ]
-        
-        log(f"Starting download {download_id}: {url}")
-        
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding='utf-8',
-            errors='replace',
-            cwd=YTDLP_DIR
-        )
+        threading.Thread(target=watchdog, args=(did, process), daemon=True).start()
+
+        last_pct = 0
+        last_printed_pct = -10
+        phase = 1 
         
         for line in process.stdout:
-            line = line.strip()
-            if not line:
-                continue
+            clean_line = line.strip()
             
-            print(f"[{download_id}] {line}")
+            if clean_line and not clean_line.startswith('[download]') and not clean_line.startswith('[youtube]'):
+                if 'ExtractAudio' in clean_line or 'Merger' in clean_line:
+                    downloads[did]['status'] = 'converting'
             
-            if 'Extracting URL' in line or 'Downloading webpage' in line:
-                downloads[download_id]['status'] = 'fetching info'
-            
-            match = re.search(r'\[download\]\s+(\d+\.?\d*)%', line)
-            if match:
-                progress = float(match.group(1))
-                downloads[download_id]['progress'] = progress
-                downloads[download_id]['status'] = 'downloading'
-            
-            match = re.search(r'at\s+([\d.]+\w+/s)', line)
-            if match:
-                downloads[download_id]['speed'] = match.group(1)
-            
-            match = re.search(r'ETA\s+([\d:]+)', line)
-            if match:
-                downloads[download_id]['eta'] = match.group(1)
-            
-            match = re.search(r'Destination:\s+(.+)', line)
-            if match:
-                filename = os.path.basename(match.group(1))
-                downloads[download_id]['title'] = filename
-            
-            if 'ExtractAudio' in line:
-                downloads[download_id]['status'] = 'converting'
-                downloads[download_id]['progress'] = 95
-        
+            if '[download]' in line and '%' in line:
+                try:
+                    pct_match = re.search(r'([0-9]{1,3}\.[0-9])%', line)
+                    if pct_match:
+                        pct = float(pct_match.group(1))
+                        if pct < last_pct and (last_pct - pct) > 50: phase = 2 
+                        last_pct = pct
+                        
+                        downloads[did]['progress'] = pct
+                        if phase == 2: downloads[did]['status'] = 'downloading audio'
+                        
+                        speed_match = re.search(r'([0-9.]+\wiB/s)', line)
+                        eta_match = re.search(r'ETA ([0-9:]+)', line)
+                        downloads[did]['speed'] = speed_match.group(1) if speed_match else '--'
+                        downloads[did]['eta'] = eta_match.group(1) if eta_match else '--'
+                        
+                        if pct - last_printed_pct >= 5.0 or pct == 100.0:
+                            print(f"[{did}] {pct}% | {downloads[did]['speed']} | ETA: {downloads[did]['eta']}")
+                            last_printed_pct = pct
+                except Exception: pass
+
         process.wait()
         
         if process.returncode == 0:
-            downloads[download_id]['status'] = 'completed'
-            downloads[download_id]['progress'] = 100
-            log(f"Completed: {download_id}")
-        else:
-            downloads[download_id]['status'] = 'failed'
-            downloads[download_id]['error'] = 'Download failed'
-            log(f"Failed: {download_id}")
-            
+            downloads[did]['status'] = 'completed'
+            downloads[did]['progress'] = 100
+            print(f"\n[✔] SUCCESS: {vid_id}")
+        elif downloads[did]['status'] != 'cancelled':
+            downloads[did]['status'] = 'failed'
+                
     except Exception as e:
-        downloads[download_id]['status'] = 'failed'
-        downloads[download_id]['error'] = str(e)
-        log(f"Error in {download_id}: {e}")
+        if downloads.get(did) and downloads[did]['status'] != 'cancelled':
+            downloads[did]['status'] = 'failed'
+    finally:
+        if did in active_processes:
+            del active_processes[did]
 
-def check_ytdlp_version():
-    try:
-        cmd = [YTDLP_EXE, '--version']
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=YTDLP_DIR, timeout=10)
-        return result.stdout.strip()
-    except:
-        return 'unknown'
+# 🔥 محرك الجدولة الليلية (يعمل في الخلفية) 🔥
+def scheduler_loop():
+    last_checked = None
+    while True:
+        now = datetime.datetime.now().strftime("%H:%M")
+        if now != last_checked:
+            with queue_lock:
+                for did, d in list(downloads.items()):
+                    if d['status'] == 'scheduled' and d.get('schedule_time') == now:
+                        print(f"\n[⏰] Scheduled task triggered: {did}")
+                        d['status'] = 'queued'
+                        t = threading.Thread(target=run_download, args=(did, d['url'], d['mode'], d.get('start_time'), d.get('end_time'), d.get('subtitles')))
+                        t.daemon = True
+                        t.start()
+            last_checked = now
+        time.sleep(10)
 
-def update_ytdlp():
-    try:
-        log("Updating yt-dlp...")
-        cmd = [YTDLP_EXE, '-U']
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd=YTDLP_DIR, timeout=60)
-        log(f"Update result: {result.stdout}")
-    except Exception as e:
-        log(f"Update failed: {e}")
+threading.Thread(target=scheduler_loop, daemon=True).start()
 
-if __name__ == "__main__":
-    log(f"Advanced Server starting on {HOST}:{PORT}")
-    version = check_ytdlp_version()
-    log(f"yt-dlp version: {version}")
-    
-    server = HTTPServer((HOST, PORT), Handler)
-    try:
-        server.serve_forever()
-    except KeyboardInterrupt:
+class Handler(http.server.BaseHTTPRequestHandler):
+    def _send_cors_headers(self):
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+
+    def log_message(self, format, *args):
         pass
-    server.server_close()
-    log("Server stopped")
+
+    def do_OPTIONS(self):
+        self.send_response(200); self._send_cors_headers(); self.end_headers()
+
+    def do_GET(self):
+        if self.path == '/':
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+            self.wfile.write(b"Server is running")
+        elif self.path == '/queue':
+            self.send_response(200); self._send_cors_headers(); self.send_header('Content-Type', 'application/json'); self.end_headers()
+            self.wfile.write(json.dumps(downloads).encode('utf-8'))
+        elif self.path == '/outdir':
+            self.send_response(200); self._send_cors_headers(); self.send_header('Content-Type', 'application/json'); self.end_headers()
+            self.wfile.write(json.dumps({"outdir": OUTDIR}).encode('utf-8'))
+        else:
+            self.send_response(404); self.end_headers()
+
+    def do_POST(self):
+        if self.path == '/update-ytdlp':
+            def update_task(): subprocess.run([YTDLP_EXE, '-U'])
+            threading.Thread(target=update_task, daemon=True).start()
+            self.send_response(200); self._send_cors_headers(); self.end_headers(); return
+            
+        elif self.path == '/shutdown':
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+            print("\n[🔌] Shutting down server gracefully...")
+            os._exit(0)
+            return
+            
+        elif self.path.startswith('/resume/'):
+            did = self.path.split('/')[-1]
+            if did in downloads and downloads[did]['status'] in['cancelled', 'failed', 'scheduled']:
+                downloads[did]['status'] = 'queued'
+                item = downloads[did]
+                t = threading.Thread(target=run_download, args=(did, item['url'], item['mode'], item.get('start_time'), item.get('end_time'), item.get('subtitles')))
+                t.daemon = True
+                t.start()
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+            return
+
+        elif self.path == '/download':
+            length = int(self.headers.get('content-length', 0))
+            if length == 0: self.send_response(400); self.end_headers(); return
+            try: body = json.loads(self.rfile.read(length).decode('utf-8'))
+            except Exception: self.send_response(400); self.end_headers(); return
+            
+            urls = body.get('batch',[])
+            if not urls and body.get('url'): urls =[body.get('url')]
+                
+            mode = body.get('mode', 'video720')
+            start_time = body.get('start_time')
+            end_time = body.get('end_time')
+            subtitles = body.get('subtitles', False)
+            schedule_time = body.get('schedule_time')
+
+            if not urls: return
+            
+            with queue_lock:
+                if len(urls) == 1:
+                    dup_status = check_duplicate(urls[0])
+                    if dup_status:
+                        self.send_response(400); self._send_cors_headers(); self.end_headers()
+                        self.wfile.write(json.dumps({"error": f"already_{dup_status}"}).encode('utf-8'))
+                        return
+                
+                for url in urls:
+                    if not url.strip(): continue
+                    if check_duplicate(url): continue
+                    
+                    did = "dl_" + str(uuid.uuid4())[:8]
+                    status = 'scheduled' if schedule_time else 'queued'
+                    
+                    downloads[did] = {
+                        "id": did, "url": url, "mode": mode, "status": status,
+                        "progress": 0, "title": url, "speed": "--", "eta": "--",
+                        "start_time": start_time, "end_time": end_time,
+                        "subtitles": subtitles, "schedule_time": schedule_time
+                    }
+                    if not schedule_time:
+                        t = threading.Thread(target=run_download, args=(did, url, mode, start_time, end_time, subtitles))
+                        t.daemon = True
+                        t.start()
+                
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+
+    def do_DELETE(self):
+        if self.path.startswith('/download/'):
+            did = self.path.split('/')[-1]
+            if did in downloads: downloads[did]['status'] = 'cancelled'
+            if did in active_processes: kill_tree(active_processes[did].pid)
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+        elif self.path.startswith('/remove/'):
+            did = self.path.split('/')[-1]
+            if did in active_processes: kill_tree(active_processes[did].pid)
+            if did in downloads: del downloads[did]
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+        elif self.path == '/queue/completed':
+            to_delete =[k for k, v in downloads.items() if v['status'] in['completed', 'cancelled', 'failed']]
+            for k in to_delete: del downloads[k]
+            self.send_response(200); self._send_cors_headers(); self.end_headers()
+
+if __name__ == '__main__':
+    server = socketserver.TCPServer(('', PORT), Handler)
+    print(f" ✅ Enterprise Server | Subs & Covers | Scheduler 🌙")
+    server.serve_forever()

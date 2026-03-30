@@ -1,148 +1,40 @@
 <!DOCTYPE html>
-<html>
+<html lang="ar" dir="rtl">
 <head>
-  <meta charset="utf-8">
-  <link rel="stylesheet" href="styles.css">
+    <meta charset="UTF-8">
+    <title>YT-dlp Helper Pro</title>
+    <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <div class="container">
-    <!-- Header -->
-    <header>
-      <h1>⚡ YT-dlp Pro</h1>
-      <div class="subtitle">محمل احترافي للفيديوهات</div>
-    </header>
-
-    <!-- Status Bar -->
-    <div class="status-bar">
-      <div class="status-indicator">
-        <div class="status-dot" id="serverStatus"></div>
-        <span id="serverText">جاري الفحص...</span>
-      </div>
-      <div id="activeDownloads">0 تحميل</div>
-    </div>
-
-    <!-- Tabs -->
-    <div class="tabs">
-      <button class="tab active" data-tab="single">فيديو واحد</button>
-      <button class="tab" data-tab="batch">تحميل متعدد</button>
-      <button class="tab" data-tab="queue">قائمة التحميل</button>
-    </div>
-
-    <!-- Single Download Tab -->
-    <div class="tab-content active" id="single-tab">
-      <div class="url-section">
-        <input 
-          type="text" 
-          id="url" 
-          placeholder="الصق رابط الفيديو هنا..."
-          autocomplete="off"
-        />
-      </div>
-
-      <!-- Quality Selection -->
-      <div class="quality-section">
-        <div class="section-title">📹 اختر الجودة:</div>
-        <div class="quality-grid">
-          <button class="quality-btn" data-mode="video1080">
-            <div class="icon">🎬</div>
-            <div>1080p</div>
-          </button>
-          <button class="quality-btn selected" data-mode="video720">
-            <div class="icon">📺</div>
-            <div>720p</div>
-          </button>
-          <button class="quality-btn" data-mode="video480">
-            <div class="icon">📱</div>
-            <div>480p</div>
-          </button>
-          <button class="quality-btn" data-mode="audio">
-            <div class="icon">🎵</div>
-            <div>صوت</div>
-          </button>
+    <div class="header">
+        <h2>🚀 YT-dlp Pro</h2>
+        <div class="actions">
+            <button id="update-btn" title="تحديث أداة yt-dlp">🔄</button>
+            <button id="open-folder-btn" title="فتح مجلد التحميلات">📂</button>
+            <button id="clear-btn" title="مسح المكتمل">🧹</button>
         </div>
-      </div>
-
-      <!-- Playlist Section -->
-      <div class="quality-section">
-        <div class="section-title">📋 قوائم التشغيل:</div>
-        <div class="quality-grid">
-          <button class="quality-btn" data-mode="playlist1080">
-            <div class="icon">📚</div>
-            <div>Playlist 1080p</div>
-          </button>
-          <button class="quality-btn" data-mode="playlist720">
-            <div class="icon">📚</div>
-            <div>Playlist 720p</div>
-          </button>
-          <button class="quality-btn" data-mode="playlist480">
-            <div class="icon">📚</div>
-            <div>Playlist 480p</div>
-          </button>
-          <button class="quality-btn" data-mode="playlist_audio">
-            <div class="icon">🎼</div>
-            <div>Playlist Audio</div>
-          </button>
+    </div>
+    
+    <div class="batch-section">
+        <textarea id="batch-urls" placeholder="أدخل أكثر من رابط هنا... (رابط في كل سطر)"></textarea>
+        <div class="batch-controls">
+            <select id="batch-quality">
+                <!-- التعديل الشكلي هنا -->
+                <option value="audio">صوت فقط (M4A)</option>
+                <option value="video480">فيديو 480p</option>
+                <option value="video720" selected>فيديو 720p</option>
+                <option value="video1080">فيديو 1080p</option>
+            </select>
+            <button id="batch-submit">تحميل الكل</button>
         </div>
-      </div>
-
-      <button class="download-btn" id="downloadBtn">
-        🚀 ابدأ التحميل
-      </button>
     </div>
 
-    <!-- Batch Download Tab -->
-    <div class="tab-content" id="batch-tab">
-      <div class="url-section">
-        <div class="section-title">📋 الصق الروابط (كل رابط في سطر):</div>
-        <textarea 
-          id="batchUrls" 
-          placeholder="https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=...&#10;https://youtube.com/watch?v=..."
-          rows="6"
-        ></textarea>
-      </div>
-
-      <div class="quality-section">
-        <div class="section-title">📹 جودة موحدة للكل:</div>
-        <select id="batchMode" class="batch-select">
-          <option value="video1080">1080p HD</option>
-          <option value="video720" selected>720p</option>
-          <option value="video480">480p</option>
-          <option value="audio">صوت MP3</option>
-        </select>
-      </div>
-
-      <button class="download-btn" id="batchDownloadBtn">
-        🚀 حمل الكل (<span id="batchCount">0</span>)
-      </button>
+    <div id="queue-container">
+        <p class="empty-msg">لا يوجد تحميلات حالياً 😴</p>
     </div>
-
-    <!-- Queue Tab -->
-    <div class="tab-content" id="queue-tab">
-      <div class="queue-header">
-        <button class="small-btn" id="refreshQueue">🔄 تحديث</button>
-        <button class="small-btn" id="openFolder">📂 فتح المجلد</button>
-        <button class="small-btn" id="clearCompleted">🗑️ مسح المكتمل</button>
-      </div>
-
-      <div id="queueList" class="queue-list">
-        <div class="empty-state">
-          لا توجد تحميلات جارية
-        </div>
-      </div>
-    </div>
-
-    <!-- Settings Section -->
-    <div class="settings-section">
-      <button class="small-btn" id="updateYtdlp">⬆️ تحديث yt-dlp</button>
-      <span id="ytdlpVersion" class="version-text">...</span>
-    </div>
-
-    <!-- Footer -->
-    <div class="footer">
-      Made with ❤️ using yt-dlp
-    </div>
-  </div>
-
-  <script src="popup.js"></script>
+    <script src="popup.js"></script>
 </body>
 </html>
+<button id="shutdown-btn" title="إغلاق السيرفر الخفي">🔌</button>
+<button id="update-btn" title="تحديث أداة yt-dlp">🔄</button>
+... (الباقي زي ما هو)
